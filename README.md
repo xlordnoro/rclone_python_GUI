@@ -2,7 +2,7 @@
 A Basic rclone GUI made in python with pyqt6
 
 # Prep Work
-Requires rclone along with any modern version of Python, and it must be in your system path to run anywhere. Linux will add it to the system path by default, but Windows users will need to add it manually to use it globally.
+**Requires rclone along with any modern version of Python, and it must be in your system path to run anywhere. Linux will add it to the system path by default, but Windows users will need to add it manually to use it globally.**
 
 I'm running the latest stable build of Python, which is `3.14.4` on cachyos, but any modern version will work for this program.
 
