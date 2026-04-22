@@ -6,9 +6,6 @@ Requires rclone along with any modern version of Python, and it must be in your 
 
 I'm running the latest stable build of Python, which is `3.14.4` on cachyos, but any modern version will work for this program.
 
-# Python Dependencies
-Run `pip install PyQt6` to download the GUI library needed to run the script, or you'll get import errors when attempting to run it.
-
 # Linux Installation
 Rclone can be downloaded via your package manager. Since I'm running cachyos, which is based on Arch Linux, I'll use pacman. Apt will be used for Ubuntu/Debian-based distros, and dnf for Fedora-based distros.
 
@@ -20,3 +17,6 @@ Depending on your flavor of Linux, you may have to create a virtual environment 
 
 Run `python -m venv myenv` to create the virtual environment in the current working directory. You can change the myenv to anything you want, but this will work for testing or if you don't care about the name.
 Next, run `source myenv/bin/activate` to enter the virtual environment. If you changed the name in the previous command, swap myenv for the name you provided, or it will not work.
+Run `pip install PyQt6` to download the GUI library needed to run the script, or you'll get import errors when attempting to run it.
+With `PyQt6` installed now, you can run `python3 rclone_GUI.pyw`.
+Run `deactivate` to exit the virtual environment.
