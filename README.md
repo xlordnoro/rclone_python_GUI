@@ -38,7 +38,7 @@ Search for `changing environment variable` in Windows search, and it will be the
 
 Your screen should look like this now. You might need to scroll down a bit to see it, but once you find `PATH` under system variables, double-click it to open another window, and we'll be able to add the rclone folder to our system path.
 
-Click on new in the top-right and paste the folder path to your rclone folder, and hit okay once you're done.
+Click on `new` in the top-right and paste the folder path to your rclone folder, and hit okay once you're done.
 
 To test that everything is working correctly, search for `Windows Terminal` on Windows 11, or you can use `cmd` or `powershell` on Windows 10.
 
@@ -46,6 +46,16 @@ Type `rclone` and you should see a bunch of text output to the console. It'll li
 
 If you get an error stating `rclone is not an internal or external program`, then your rclone folder path is either incorrect, or if you had a terminal window active, you'll need to close it since the system path is only refreshed when the program is reopened.
 
-If everything is running okay, type `rclone config` to setup the remote for your account(s). Once you finish entering your remote name, provider, and account details, it will ask some additional questions. Just type n or press enter with the defaults if you're unsure what they mean. I suspect they might be somewhat different for each provider, but I'm only familiar with b2 aka backblaze. So bare that in mind.
+If everything is running okay, type `rclone config` to setup the remote for your account(s). Once you finish entering your remote name, provider, and account details, it will ask some additional questions. Just type `n` or press enter with the defaults if you're unsure what they mean. I suspect they might be somewhat different for each provider, but I'm only familiar with b2 aka backblaze. So bare that in mind.
 
-Once you're back to the initial setup screen, type q to quit the setup process, and we can finally move onto the rclone GUI stuff.
+Once you're back to the initial setup screen, type `q` to quit the setup process, and we can finally move on to the rclone GUI stuff.
+
+Unlike Linux, Windows doesn't come with Python pre-installed, so you'll need to grab the latest stable build from their site. <a href="https://www.python.org/downloads/windows/" alt="python">Python</a>
+
+Make sure to select `add to system path` on the first page of the installer, or you won't be able to call python or pip globally like we did with rclone.
+
+It will take a bit to install since it needs to grab a bunch of libraries to function properly, but once the install is complete, you're ready to install `PyQt6` on your system.
+
+Run `pip install PyQt6` and it will immediately start downloading the library to your system. It's a few hundred mb so if your internet is slow, just be patient and let it do its thing.
+
+Once `PyQt6` is installed, you can now run `rclone_GUI.pyw` without triggering any errors. You can either double-click it in file explorer or run it as a command `python rclone_GUI.pyw` and you should see a terminal window pop up with rclone. Close the rclone window. I'm not 100% sure why it only happens in Windows since Linux doesn't do that, and you should see the GUI like this.
