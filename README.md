@@ -58,4 +58,6 @@ It will take a bit to install since it needs to grab a bunch of libraries to fun
 
 Run `pip install PyQt6` and it will immediately start downloading the library to your system. It's a few hundred mb so if your internet is slow, just be patient and let it do its thing.
 
-Once `PyQt6` is installed, you can now run `rclone_GUI.pyw` without triggering any errors. You can either double-click it in file explorer or run it as a command `python rclone_GUI.pyw` and you should see a terminal window pop up with rclone. Close the rclone window. I'm not 100% sure why it only happens in Windows since Linux doesn't do that, and you should see the GUI like this.
+Once `PyQt6` is installed, you can now run `rclone_GUI.pyw` without triggering any errors. You can either double-click it in file explorer or run it as a command `python rclone_GUI.pyw` in the terminal, and you should see a terminal window pop up with rclone. Close the rclone window. I'm not 100% sure why it only happens in Windows since Linux doesn't do that (might be a subprocess difference between the OS's), and you should see the GUI like this. 
+
+<img width="1205" height="735" alt="cyberdunk_clone_blur" src="https://github.com/user-attachments/assets/5f84f707-f373-4690-920c-69eff1405b1b" />
