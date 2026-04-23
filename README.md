@@ -46,18 +46,20 @@ Type `rclone` and you should see a bunch of text output to the console. It'll li
 
 If you get an error stating `rclone is not an internal or external program`, then your rclone folder path is either incorrect, or if you had a terminal window active, you'll need to close it since the system path is only refreshed when the program is reopened.
 
-If everything is running okay, type `rclone config` to setup the remote for your account(s). Once you finish entering your remote name, provider, and account details, it will ask some additional questions. Just type `n` or press enter with the defaults if you're unsure what they mean. I suspect they might be somewhat different for each provider, but I'm only familiar with b2 aka backblaze. So bare that in mind.
+If everything is running okay, type `rclone config` to set up the remote for your account(s). Once you finish entering your remote name, provider, and account details, it will ask some additional questions. Just type `n` or press enter with the defaults if you're unsure what they mean. I'm only familiar with B2, aka Backblaze. So bear that in mind.
 
 Once you're back to the initial setup screen, type `q` to quit the setup process, and we can finally move on to the rclone GUI stuff.
 
 Unlike Linux, Windows doesn't come with Python pre-installed, so you'll need to grab the latest stable build from their site. <a href="https://www.python.org/downloads/windows/" alt="python">Python</a>
 
-Make sure to select `add to system path` on the first page of the installer, or you won't be able to call python or pip globally like we did with rclone.
+Make sure to select `add to system path` on the first page of the installer, or you won't be able to call Python or pip globally as we did with rclone.
 
-It will take a bit to install since it needs to grab a bunch of libraries to function properly, but once the install is complete, you're ready to install `PyQt6` on your system.
+It will take a bit to install since it needs to download a bunch of libraries to function properly, but once the installation is complete, you're ready to install `PyQt6` on your system.
 
-Run `pip install PyQt6` and it will immediately start downloading the library to your system. It's a few hundred mb so if your internet is slow, just be patient and let it do its thing.
+Run `pip install PyQt6`, and it will immediately start downloading the library to your system. It's a few hundred mb so if your internet is slow, just be patient and let it do its thing.
 
-Once `PyQt6` is installed, you can now run `rclone_GUI.pyw` without triggering any errors. You can either double-click it in file explorer or run it as a command `python rclone_GUI.pyw` in the terminal, and you should see a terminal window pop up with rclone. Close the rclone window. I'm not 100% sure why it only happens in Windows since Linux doesn't do that (might be a subprocess difference between the OS's), and you should see the GUI like this. 
+Once `PyQt6` is installed, you can run `rclone_GUI.pyw` without triggering any errors. You can either double-click it in file explorer or run it as a command `python rclone_GUI.pyw` in the terminal, and you should see a terminal window pop up with rclone. Close the rclone window. I'm not 100% sure why it only happens in Windows since Linux doesn't do that (might be a subprocess difference between the OS's), and you should see the GUI like this.
+
+By design, it will auto-populate all rclone remotes detected on your system into a dropdown list. I only have one Rclone remote, so it's the only one that will show up in the dropdown menu.
 
 <img width="1205" height="735" alt="cyberdunk_clone_blur" src="https://github.com/user-attachments/assets/5f84f707-f373-4690-920c-69eff1405b1b" />
