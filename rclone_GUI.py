@@ -3,6 +3,8 @@ import subprocess
 import json
 import posixpath
 import os
+import platform
+import shutil
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton,
@@ -14,6 +16,23 @@ from PyQt6.QtCore import QThread, pyqtSignal, QSettings, Qt, QUrl, QMimeData
 from PyQt6.QtGui import QDrag, QIcon
 from PyQt6 import QtGui
 
+# Setup rclone location
+def get_base_dir():
+    if hasattr(sys, "_MEIPASS"):
+        return sys._MEIPASS  # PyInstaller temp folder
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def get_rclone_path():
+    base = get_base_dir()
+    system = platform.system()
+
+    if system == "Windows":
+        return os.path.join(base, "rclone.exe")
+    else:
+        return os.path.join(base, "rclone")  # linux/mac
+
+RCLONE_PATH = get_rclone_path()
 
 # ---------------------------
 # WORKER
@@ -32,7 +51,7 @@ class RcloneWorker(QThread):
 
     def run(self):
         cmd = [
-            "rclone", "copy",
+            RCLONE_PATH, "copy",
             self.source,
             self.destination,
             "--progress",
@@ -85,7 +104,7 @@ class RcloneRenameWorker(QThread):
     def run(self):
         self.process = subprocess.Popen(
             [
-                "rclone", "moveto",
+                RCLONE_PATH, "moveto",
                 self.source,
                 self.destination,
                 "--progress",
@@ -118,6 +137,34 @@ class LocalTree(QTreeWidget):
         self.setHeaderLabel("Local")
         self.setDragEnabled(True)
         self.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+
+    def contextMenuEvent(self, event):
+        item = self.itemAt(event.pos())
+        if not item:
+            return
+
+        menu = QMenu(self)
+
+        new_folder_action = menu.addAction("New Folder")
+        delete_action = menu.addAction("Delete")
+        rename_action = menu.addAction("Rename")
+
+        action = menu.exec(event.globalPos())
+
+        if action == rename_action:
+            self.parent().rename_local_item(item)
+
+        elif action == new_folder_action:
+            self.setCurrentItem(item)
+            self.parent().create_local_folder()
+
+        elif action == delete_action:
+            items = self.selectedItems()
+
+            if item not in items:
+                items.append(item)
+
+            self.parent().delete_local_items(items)
 
     def startDrag(self, supportedActions):
         items = self.selectedItems()
@@ -258,12 +305,12 @@ class RcloneDeleteWorker(QThread):
         for path in self.paths:
 
             # Try file delete first
-            cmd = ["rclone", "delete", path]
+            cmd = [RCLONE_PATH, "delete", path]
             code = self._run_cmd(cmd, "[delete]")
 
             # If it fails, assume directory → purge
             if code != 0:
-                cmd = ["rclone", "purge", path]
+                cmd = [RCLONE_PATH, "purge", path]
                 self._run_cmd(cmd, "[delete][dir]")
 
         self.finished_signal.emit(self)
@@ -336,6 +383,8 @@ class RcloneGUI(QWidget):
         pane = QHBoxLayout()
 
         self.local_tree = LocalTree()
+        self.local_tree.setParent(self)
+
         self.remote_tree = RemoteTree()
         self.remote_tree.setParent(self)
 
@@ -388,7 +437,7 @@ class RcloneGUI(QWidget):
 
         self.upload_btn.clicked.connect(self.start_upload)
         self.cancel_btn.clicked.connect(self.cancel_upload)
-        self.refresh_btn.clicked.connect(self.refresh_remote)
+        self.refresh_btn.clicked.connect(self.refresh_all)
         self.mkdir_btn.clicked.connect(self.create_remote_folder)
 
         dark_mode = self.settings.value("dark_mode", False, type=bool)
@@ -662,7 +711,7 @@ class RcloneGUI(QWidget):
     def _is_valid_remote_path(self, path):
         try:
             r = subprocess.run(
-                ["rclone", "lsjson", path],
+                [RCLONE_PATH, "lsjson", path],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -697,12 +746,32 @@ class RcloneGUI(QWidget):
         except Exception as e:
             print("[cache] failed:", e)
 
+    def _invalidate_cache_paths(self, paths):
+        for p in paths:
+            # remove exact path cache
+            if p in self.remote_cache:
+                del self.remote_cache[p]
+
+            # also remove parent listing (important!)
+            parent = posixpath.dirname(p)
+            if parent in self.remote_cache:
+                del self.remote_cache[parent]
+
+    def _remove_items_from_tree(self, items):
+        for item in items:
+            parent = item.parent()
+            if parent:
+                parent.removeChild(item)
+            else:
+                index = self.remote_tree.indexOfTopLevelItem(item)
+                self.remote_tree.takeTopLevelItem(index)
+
     # ---------------------------
     # REMOTES
     # ---------------------------
     def load_remotes(self):
         r = subprocess.run(
-            ["rclone", "listremotes"],
+            [RCLONE_PATH, "listremotes"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -735,14 +804,20 @@ class RcloneGUI(QWidget):
 
         self.settings.setValue("last_local", path)
 
-        for name in os.listdir(path):
-            full = os.path.join(path, name)
+        self._load_local_children(item, path)
 
-            child = QTreeWidgetItem(item, [name])
-            child.setData(0, Qt.ItemDataRole.UserRole, full)
+    def _load_local_children(self, parent, path):
+        try:
+            for name in os.listdir(path):
+                full = os.path.join(path, name)
 
-            if os.path.isdir(full):
-                child.addChild(QTreeWidgetItem(["..."]))
+                child = QTreeWidgetItem(parent, [name])
+                child.setData(0, Qt.ItemDataRole.UserRole, full)
+
+                if os.path.isdir(full):
+                    child.addChild(QTreeWidgetItem(["..."]))
+        except Exception as e:
+            self.log.append(f"[local error] {e}")
 
     # ---------------------------
     # REMOTE
@@ -778,7 +853,7 @@ class RcloneGUI(QWidget):
             return self.remote_cache[path]
 
         r = subprocess.run(
-            ["rclone", "lsjson", path],
+            [RCLONE_PATH, "lsjson", path],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -800,29 +875,40 @@ class RcloneGUI(QWidget):
 
         # HARD GUARD (fast path)
         is_dir = item.data(0, Qt.ItemDataRole.UserRole + 1)
-
         if is_dir is not True:
             return
 
-        # 🔥 VERIFY WITH RCLONE (prevents files pretending to be folders)
-        test = subprocess.run(
-            ["rclone", "lsjson", path],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace"
-        )
+        # Use cache first
+        cached = self.remote_cache.get(path)
 
-        if test.returncode != 0:
-            # ❌ Not actually a directory → fix UI state
-            self.log.append(f"[fix] not a directory: {path}")
-
-            item.setData(0, Qt.ItemDataRole.UserRole + 1, False)
-            item.setChildIndicatorPolicy(
-                QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator
+        if cached is None:
+            # Only verify with rclone if NOT cached
+            test = subprocess.run(
+                [RCLONE_PATH, "lsjson", path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace"
             )
-            item.takeChildren()
-            return
+
+            if test.returncode != 0:
+                # Not actually a directory → fix UI state
+                self.log.append(f"[fix] not a directory: {path}")
+
+                item.setData(0, Qt.ItemDataRole.UserRole + 1, False)
+                item.setChildIndicatorPolicy(
+                    QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator
+                )
+                item.takeChildren()
+                return
+
+            # Cache the successful result
+            try:
+                cached = json.loads(test.stdout or "[]")
+                self.remote_cache[path] = cached
+                self._save_cache_to_disk()
+            except:
+                cached = []
 
         # already expanded → do nothing
         if item.childCount() != 1:
@@ -831,12 +917,16 @@ class RcloneGUI(QWidget):
         # remove placeholder
         item.takeChildren()
 
-        # keep your existing validation layer
-        if not self._is_valid_remote_path(path):
-            self.log.append(f"[blocked] invalid folder: {path}")
-            return
+        # Only validate if we don't find the files/folders in the cache
+        # (you can remove this entirely if confident in lsjson)
+        if path not in self.remote_cache:
+            if not self._is_valid_remote_path(path):
+                self.log.append(f"[blocked] invalid folder: {path}")
+                return
 
         self.remote_path_bar.setText(path)
+
+        # Pass cached data directly to avoid another lookup
         self._load_remote_children(item, path)
 
     def _load_remote_children(self, parent, path):
@@ -850,6 +940,10 @@ class RcloneGUI(QWidget):
 
         for entry in data:
             name = entry["Name"]
+
+            if name == ".bzEmpty":
+                continue
+
             is_dir = entry.get("IsDir")
 
             # fallback: if IsDir is missing, infer from Size (dirs usually have no Size)
@@ -931,6 +1025,7 @@ class RcloneGUI(QWidget):
         src, dest = self.upload_queue.pop(0)
 
         worker = RcloneWorker(src, dest, transfers=self.transfers_dropdown.currentText())
+        worker.dest = dest
         worker.output_signal.connect(self.log.append)
         worker.progress_signal.connect(self.update_progress)
         #worker.progress_signal.connect(self.progress.setValue)
@@ -942,13 +1037,22 @@ class RcloneGUI(QWidget):
     def on_upload_finished(self, worker):
         self.completed_uploads += 1
 
-        # show percentage instead of 1/1 style
+        # show percentage
         if self.total_uploads > 0:
             percent = int((self.completed_uploads / self.total_uploads) * 100)
             self.progress.setValue(percent)
             self.progress.setFormat(f"{percent}%")
 
-        self.remote_cache.clear()
+        # get destination path from worker
+        dest = getattr(worker, "dest", None)
+
+        if dest:
+            # invalidate only affected paths
+            self._invalidate_cache_paths([
+                dest,
+                posixpath.dirname(dest)
+            ])
+
         self._save_cache_to_disk()
 
         self.refresh_remote()
@@ -993,18 +1097,32 @@ class RcloneGUI(QWidget):
     # REFRESH
     # ---------------------------
     def refresh_remote(self):
-        self.remote_cache.clear()
-        self._save_cache_to_disk()
-
         path = self.remote_path_bar.text().strip()
         item = self._find_item(self.remote_tree.invisibleRootItem(), path)
 
         if item:
+            expanded = item.isExpanded()
+
             item.takeChildren()
             self._load_remote_children(item, path)
+
+            item.setExpanded(expanded)
         else:
-            self.remote_tree.clear()
             self.load_remote_root()
+
+    def refresh_local(self):
+        path = self.local_path_bar.text().strip()
+        if not path:
+            return
+
+        item = self._find_item(self.local_tree.invisibleRootItem(), path)
+
+        if item:
+            item.takeChildren()
+            self._load_local_children(item, path)
+        else:
+            self.local_tree.clear()
+            self.load_local_files(path)
 
     def _find_item(self, parent, path):
         for i in range(parent.childCount()):
@@ -1018,6 +1136,131 @@ class RcloneGUI(QWidget):
                 return found
 
         return None
+
+    # Local
+    def rename_local_item(self, item):
+        old_path = item.data(0, Qt.ItemDataRole.UserRole)
+        if not old_path:
+            return
+
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Rename remote item")
+        dialog.setLabelText("New name:")
+        dialog.setTextValue(os.path.basename(old_path))
+
+        dialog.setMinimumWidth(700)
+        dialog.resize(700, 160)
+
+        line_edit = dialog.findChild(QLineEdit)
+        if line_edit:
+            line_edit.setMinimumWidth(650)
+
+        ok = dialog.exec()
+        new_name = dialog.textValue()
+
+        if not ok or not new_name:
+            return
+
+        new_path = os.path.join(os.path.dirname(old_path), new_name)
+
+        try:
+            os.rename(old_path, new_path)
+            parent_path = os.path.dirname(old_path)
+            parent_item = self._find_item(self.local_tree.invisibleRootItem(), parent_path)
+
+            if parent_item:
+                parent_item.takeChildren()
+                self._load_local_children(parent_item, parent_path)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Rename failed", str(e))
+
+    def delete_local_items(self, items):
+        paths = [
+            i.data(0, Qt.ItemDataRole.UserRole)
+            for i in items if i.data(0, Qt.ItemDataRole.UserRole)
+        ]
+
+        if not paths:
+            return
+
+        preview = "\n".join(paths[:10])
+        if len(paths) > 10:
+            preview += f"\n... (+{len(paths) - 10} more)"
+
+        confirm = QMessageBox.question(
+            self,
+            "Delete",
+            f"Delete these files?\n\n{preview}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+
+        for path in paths:
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+            except Exception as e:
+                self.log.append(f"[local delete error] {e}")
+
+        for item in items:
+            parent = item.parent()
+            if parent:
+                parent.removeChild(item)
+
+    def create_local_folder(self):
+        item = self.local_tree.currentItem()
+
+        base_path = None
+        if item:
+            base_path = item.data(0, Qt.ItemDataRole.UserRole)
+
+        if not base_path:
+            base_path = self.local_path_bar.text().strip()
+
+        if not base_path:
+            return
+
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Create Folder")
+        dialog.setLabelText(f"Create in:\n{base_path}\n\nFolder name:")
+
+        # Make it wide
+        dialog.setMinimumWidth(500)
+        dialog.resize(500, 160)
+
+        # Make input field wider too
+        line_edit = dialog.findChild(QLineEdit)
+        if line_edit:
+            line_edit.setMinimumWidth(500)
+
+        ok = dialog.exec()
+        name = dialog.textValue()
+
+        if not ok or not name:
+            return
+
+        new_path = os.path.join(base_path, name)
+
+        try:
+            os.makedirs(new_path, exist_ok=True)
+            parent_item = self.local_tree.currentItem()
+
+            if parent_item:
+                base_path = parent_item.data(0, Qt.ItemDataRole.UserRole)
+                parent_item.takeChildren()
+                self._load_local_children(parent_item, base_path)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Create folder failed", str(e))
+
+    def refresh_all(self):
+        self.refresh_local()
+        self.refresh_remote()
 
     # ---------------------------
     # RENAME
@@ -1101,9 +1344,12 @@ class RcloneGUI(QWidget):
         def on_done(w):
             self.log.append("✅ Delete complete")
 
-            self.remote_cache.clear()
+            # remove from cache ONLY what changed
+            self._invalidate_cache_paths(paths)
             self._save_cache_to_disk()
-            self.refresh_remote()
+
+            # remove from UI instantly
+            self._remove_items_from_tree(items)
 
         worker.finished_signal.connect(on_done)
 
@@ -1149,7 +1395,7 @@ class RcloneGUI(QWidget):
         self.log.append(f"[mkdir] Creating: {new_path}")
 
         r = subprocess.run(
-            ["rclone", "mkdir", new_path],
+            [RCLONE_PATH, "mkdir", new_path],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1159,7 +1405,7 @@ class RcloneGUI(QWidget):
         marker = posixpath.join(new_path, ".bzEmpty")
 
         r = subprocess.run(
-            ["rclone", "touch", marker],
+            [RCLONE_PATH, "touch", marker],
             capture_output=True,
             text=True,
             encoding="utf-8",
