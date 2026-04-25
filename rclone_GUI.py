@@ -16,22 +16,38 @@ from PyQt6.QtCore import QThread, pyqtSignal, QSettings, Qt, QUrl, QMimeData
 from PyQt6.QtGui import QDrag, QIcon
 from PyQt6 import QtGui
 
-# Setup rclone location
-def get_base_dir():
+def get_app_dir():
+    # Where the .exe / script actually lives (NOT temp folder)
     if getattr(sys, "frozen", False):
-        return sys._MEIPASS  # PyInstaller bundle folder
+        return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
-BASE_DIR = get_base_dir()
+APP_DIR = get_app_dir()
 
 def get_rclone_path():
     exe = "rclone.exe" if os.name == "nt" else "rclone"
-    path = os.path.join(BASE_DIR, exe)
 
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"rclone not found at: {path}")
+    # 1. bundled by PyInstaller (optional)
+    bundled = os.path.join(getattr(sys, "_MEIPASS", ""), exe)
+    if getattr(sys, "frozen", False) and os.path.exists(bundled):
+        return bundled
 
-    return path
+    # 2. portable folder next to app (THIS is your ZIP case)
+    local = os.path.join(APP_DIR, exe)
+    if os.path.exists(local):
+        return local
+
+    # 3. fallback: system PATH (dev mode)
+    system = shutil.which("rclone")
+    if system:
+        return system
+
+    raise FileNotFoundError(
+        f"rclone not found.\nChecked:\n"
+        f"  - {bundled}\n"
+        f"  - {local}\n"
+        f"  - system PATH"
+    )
 
 RCLONE_PATH = get_rclone_path()
 
