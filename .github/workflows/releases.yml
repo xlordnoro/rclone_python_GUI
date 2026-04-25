@@ -52,9 +52,10 @@ jobs:
 
       - name: Prepare release folder
         run: |
-          mkdir release
+          mkdir release 
           copy dist\rclone_GUI.exe release\
           copy rclone.exe release\
+          copy icon.ico release\
 
       - name: Zip release
         run: powershell Compress-Archive -Path release\* -DestinationPath rclone_GUI-windows-${{ github.ref_name }}.zip
@@ -108,6 +109,7 @@ jobs:
           mkdir release
           cp dist/rclone_GUI release/
           cp rclone release/
+          cp icon.png release/
 
       - name: Zip release
         run: zip -r rclone_GUI-linux-${{ github.ref_name }}.zip release
@@ -156,6 +158,7 @@ jobs:
           mkdir release
           cp dist/rclone_GUI release/
           cp rclone release/
+          cp icon.png release/
 
       - name: Zip release
         run: zip -r rclone_GUI-macos-intel-${{ github.ref_name }}.zip release
@@ -204,6 +207,7 @@ jobs:
           mkdir release
           cp dist/rclone_GUI release/
           cp rclone release/
+          cp icon.png release/
 
       - name: Zip release
         run: zip -r rclone_GUI-macos-arm64-${{ github.ref_name }}.zip release
