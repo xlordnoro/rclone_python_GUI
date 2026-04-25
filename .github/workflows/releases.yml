@@ -56,6 +56,7 @@ jobs:
           copy dist\rclone_GUI.exe release\
           copy rclone.exe release\
           copy icon.ico release\
+          copy icon.png release\
 
       - name: Zip release
         run: powershell Compress-Archive -Path release\* -DestinationPath rclone_GUI-windows-${{ github.ref_name }}.zip
