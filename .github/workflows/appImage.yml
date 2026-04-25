@@ -1,0 +1,121 @@
+name: Build Linux AppImage
+
+on:
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+
+# =========================================================
+# LINUX APPIMAGE (x86_64)
+# =========================================================
+  build-appimage-x86_64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget unzip libfuse2 zsync
+
+      # -----------------------------------------------------
+      # Download portable Python
+      # -----------------------------------------------------
+      - name: Download and extract portable Python
+        run: |
+          wget https://github.com/astral-sh/python-build-standalone/releases/download/20260211/cpython-3.14.3+20260211-x86_64-unknown-linux-gnu-install_only.tar.gz -O python.tar.gz
+
+          mkdir -p AppDir/usr
+          tar --strip-components=1 -xzf python.tar.gz -C AppDir/usr
+
+          AppDir/usr/bin/python3 -m ensurepip
+          AppDir/usr/bin/python3 -m pip install --upgrade pip
+          AppDir/usr/bin/python3 -m pip install PyQt6
+
+      # -----------------------------------------------------
+      # Prepare AppDir structure
+      # -----------------------------------------------------
+      - name: Prepare AppDir
+        run: |
+          mkdir -p AppDir/usr/app
+
+          cp rclone_GUI.py AppDir/usr/app/
+
+          cp -r css AppDir/usr/app/ || true
+          cp -r translations AppDir/usr/app/ || true
+
+          cp icon.png AppDir/
+          cp icon.ico AppDir/
+          cp AppRun AppDir/
+          chmod +x AppDir/AppRun
+
+      # -----------------------------------------------------
+      # Download rclone (Linux x64)
+      # -----------------------------------------------------
+      - name: Download rclone
+        run: |
+          curl -LO https://downloads.rclone.org/rclone-current-linux-amd64.zip
+          unzip rclone-current-linux-amd64.zip
+          cp rclone-*/rclone AppDir/usr/bin/rclone
+          chmod +x AppDir/usr/bin/rclone
+
+      # -----------------------------------------------------
+      # Precompile Python
+      # -----------------------------------------------------
+      - name: Precompile Python code
+        run: |
+          APPDIR=AppDir
+          PYTHON_BIN=$APPDIR/usr/bin/python3
+
+          export SOURCE_DATE_EPOCH=1700000000
+
+          mkdir -p $APPDIR/__pycache__
+
+          $PYTHON_BIN -m compileall -b -f $APPDIR/usr/app
+
+      # -----------------------------------------------------
+      # Normalize timestamps (reproducible builds)
+      # -----------------------------------------------------
+      - name: Normalize timestamps
+        run: |
+          find AppDir -exec touch -h -d "@1700000000" {} +
+
+      # -----------------------------------------------------
+      # Download appimagetool
+      # -----------------------------------------------------
+      - name: Download appimagetool
+        run: |
+          wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+
+      # -----------------------------------------------------
+      # Build AppImage + zsync
+      # -----------------------------------------------------
+      - name: Build AppImage
+        run: |
+          ARCH=x86_64
+
+          UPDATE_INFO="gh-releases-zsync|${{ github.repository_owner }}|${{ github.event.repository.name }}|latest|rclone_GUI-$ARCH.AppImage.zsync"
+
+          ./appimagetool-x86_64.AppImage \
+            -u "$UPDATE_INFO" \
+            AppDir rclone_GUI-$ARCH.AppImage
+
+          mkdir -p release-linux
+          mv rclone_GUI-$ARCH.AppImage* release-linux/
+
+      # -----------------------------------------------------
+      # Upload to GitHub Release
+      # -----------------------------------------------------
+      - name: Upload artifacts to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-linux/*.AppImage
+            release-linux/*.zsync
