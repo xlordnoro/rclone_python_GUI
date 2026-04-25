@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=rclone_GUI
+Comment=rclone GUI
+Exec=rclone_GUI
+Icon=icon
+Terminal=false
+Type=Application
+Categories=Utility;
