@@ -368,7 +368,7 @@ class RcloneGUI(QWidget):
         # CACHE
         self.remote_cache = {}
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-        self.cache_file = os.path.join(BASE_DIR, "rclone_gui_cache.json")
+        self.cache_file = os.path.join(APP_DIR, "rclone_gui_cache.json")
 
         self.remote_cache = {}
         self._load_cache_from_disk()
