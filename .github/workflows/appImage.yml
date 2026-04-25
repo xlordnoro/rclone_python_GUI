@@ -47,9 +47,6 @@ jobs:
 
           cp rclone_GUI.py AppDir/usr/app/
 
-          cp -r css AppDir/usr/app/ || true
-          cp -r translations AppDir/usr/app/ || true
-
           cp icon.png AppDir/
           cp icon.ico AppDir/
           cp rclone_gui.desktop AppDir/
