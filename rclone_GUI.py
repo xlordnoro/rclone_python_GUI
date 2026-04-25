@@ -17,27 +17,62 @@ from PyQt6.QtGui import QDrag, QIcon
 from PyQt6 import QtGui
 
 def get_app_dir():
-    # Where the .exe / script actually lives (NOT temp folder)
+    # --------------------------------------------------
+    # PyInstaller (onefile/onedir)
+    # --------------------------------------------------
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
+
+    # --------------------------------------------------
+    # AppImage
+    # --------------------------------------------------
+    if "APPIMAGE" in os.environ:
+        # Path to the AppImage file itself
+        return os.path.dirname(os.environ["APPIMAGE"])
+
+    # --------------------------------------------------
+    # Normal script
+    # --------------------------------------------------
     return os.path.dirname(os.path.abspath(__file__))
 
+def get_writable_dir():
+    """
+    Where we should store cache/config files.
+    Always writable.
+    """
+
+    # AppImage → use where the AppImage is located
+    if "APPIMAGE" in os.environ:
+        return os.path.dirname(os.environ["APPIMAGE"])
+
+    # Otherwise → same as app dir
+    return get_app_dir()
+
 APP_DIR = get_app_dir()
+DATA_DIR = get_writable_dir()
 
 def get_rclone_path():
     exe = "rclone.exe" if os.name == "nt" else "rclone"
 
-    # 1. bundled by PyInstaller (optional)
+    # 1. PyInstaller bundle
     bundled = os.path.join(getattr(sys, "_MEIPASS", ""), exe)
     if getattr(sys, "frozen", False) and os.path.exists(bundled):
         return bundled
 
-    # 2. portable folder next to app (THIS is your ZIP case)
+    # 2. portable folder next to app
     local = os.path.join(APP_DIR, exe)
     if os.path.exists(local):
         return local
 
-    # 3. fallback: system PATH (dev mode)
+    # 3. AppImage embedded location
+    appimage_bin = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "bin", exe
+    )
+    appimage_bin = os.path.abspath(appimage_bin)
+    if os.path.exists(appimage_bin):
+        return appimage_bin
+
+    # 4. system PATH
     system = shutil.which("rclone")
     if system:
         return system
@@ -46,6 +81,7 @@ def get_rclone_path():
         f"rclone not found.\nChecked:\n"
         f"  - {bundled}\n"
         f"  - {local}\n"
+        f"  - {appimage_bin}\n"
         f"  - system PATH"
     )
 
@@ -368,7 +404,7 @@ class RcloneGUI(QWidget):
         # CACHE
         self.remote_cache = {}
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-        self.cache_file = os.path.join(APP_DIR, "rclone_gui_cache.json")
+        self.cache_file = os.path.join(DATA_DIR, "rclone_gui_cache.json")
 
         self.remote_cache = {}
         self._load_cache_from_disk()
