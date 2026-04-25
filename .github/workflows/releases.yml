@@ -44,9 +44,10 @@ jobs:
           Copy-Item $exe.FullName "rclone.exe"
 
       - name: Build executable
+        shell: pwsh
         run: |
-          pyinstaller --noconfirm --windowed --onefile ^
-            --add-data "icon.png;." ^
+          pyinstaller --noconfirm --windowed --onefile `
+            --add-data "icon.png;." `
             rclone_GUI.py
 
       - name: Prepare release folder
