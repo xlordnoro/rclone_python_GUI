@@ -30,12 +30,18 @@ jobs:
 
       # Download latest rclone
       - name: Download rclone (Windows)
-        shell: powershell
+        shell: pwsh
         run: |
-          curl -LO https://downloads.rclone.org/rclone-current-windows-amd64.zip
-          tar -xf rclone-current-windows-amd64.zip
-          $dir = Get-ChildItem -Directory rclone-* | Select-Object -First 1
-          Copy-Item "$dir\rclone.exe" rclone.exe
+          $url = "https://downloads.rclone.org/rclone-current-windows-amd64.zip"
+          $zip = "rclone.zip"
+      
+          Invoke-WebRequest -Uri $url -OutFile $zip
+      
+          Expand-Archive $zip -DestinationPath "rclone" -Force
+      
+          $exe = Get-ChildItem -Path "rclone" -Recurse -Filter "rclone.exe" | Select-Object -First 1
+      
+          Copy-Item $exe.FullName "rclone.exe"
 
       - name: Build executable
         run: |
@@ -50,12 +56,12 @@ jobs:
           copy rclone.exe release\
 
       - name: Zip release
-        run: powershell Compress-Archive -Path release\* -DestinationPath app-windows-${{ github.ref_name }}.zip
+        run: powershell Compress-Archive -Path release\* -DestinationPath rclone_GUI-windows-${{ github.ref_name }}.zip
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: app-windows-${{ github.ref_name }}.zip
+          files: rclone_GUI-windows-${{ github.ref_name }}.zip
 
 
 # =========================================================
@@ -103,12 +109,12 @@ jobs:
           cp rclone release/
 
       - name: Zip release
-        run: zip -r app-linux-${{ github.ref_name }}.zip release
+        run: zip -r rclone_GUI-linux-${{ github.ref_name }}.zip release
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: app-linux-${{ github.ref_name }}.zip
+          files: rclone_GUI-linux-${{ github.ref_name }}.zip
 
 
 # =========================================================
@@ -138,7 +144,7 @@ jobs:
           cp rclone-*/rclone ./rclone
           chmod +x rclone
 
-      - name: Build app
+      - name: Build rclone_GUI
         run: |
           pyinstaller --noconfirm --windowed --onefile \
             --add-data "icon.png:." \
@@ -151,16 +157,16 @@ jobs:
           cp rclone release/
 
       - name: Zip release
-        run: zip -r app-macos-intel-${{ github.ref_name }}.zip release
+        run: zip -r rclone_GUI-macos-intel-${{ github.ref_name }}.zip release
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: app-macos-intel-${{ github.ref_name }}.zip
+          files: rclone_GUI-macos-intel-${{ github.ref_name }}.zip
 
 
 # =========================================================
-# MACOS (Apple Silicon ARM64)
+# MACOS (rclone_GUIle Silicon ARM64)
 # =========================================================
   build-macos-arm64:
     runs-on: macos-latest   # ARM64 runner
@@ -186,7 +192,7 @@ jobs:
           cp rclone-*/rclone ./rclone
           chmod +x rclone
 
-      - name: Build app (ARM64 native)
+      - name: Build rclone_GUI (ARM64 native)
         run: |
           pyinstaller --noconfirm --windowed --onefile \
             --add-data "icon.png:." \
@@ -199,9 +205,9 @@ jobs:
           cp rclone release/
 
       - name: Zip release
-        run: zip -r app-macos-arm64-${{ github.ref_name }}.zip release
+        run: zip -r rclone_GUI-macos-arm64-${{ github.ref_name }}.zip release
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: app-macos-arm64-${{ github.ref_name }}.zip
+          files: rclone_GUI-macos-arm64-${{ github.ref_name }}.zip
