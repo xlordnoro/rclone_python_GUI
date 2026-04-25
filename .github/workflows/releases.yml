@@ -41,12 +41,12 @@ jobs:
         run: |
           pyinstaller --noconfirm --windowed --onefile ^
             --add-data "icon.png;." ^
-            main.py
+            rclone_GUI.py
 
       - name: Prepare release folder
         run: |
           mkdir release
-          copy dist\main.exe release\
+          copy dist\rclone_GUI.exe release\
           copy rclone.exe release\
 
       - name: Zip release
@@ -94,12 +94,12 @@ jobs:
         run: |
           pyinstaller --noconfirm --windowed --onefile \
             --add-data "icon.png:." \
-            main.py
+            rclone_GUI.py
 
       - name: Prepare release folder
         run: |
           mkdir release
-          cp dist/main release/
+          cp dist/rclone_GUI release/
           cp rclone release/
 
       - name: Zip release
@@ -142,12 +142,12 @@ jobs:
         run: |
           pyinstaller --noconfirm --windowed --onefile \
             --add-data "icon.png:." \
-            main.py
+            rclone_GUI.py
 
       - name: Prepare release folder
         run: |
           mkdir release
-          cp dist/main release/
+          cp dist/rclone_GUI release/
           cp rclone release/
 
       - name: Zip release
@@ -190,12 +190,12 @@ jobs:
         run: |
           pyinstaller --noconfirm --windowed --onefile \
             --add-data "icon.png:." \
-            main.py
+            rclone_GUI.py
 
       - name: Prepare release folder
         run: |
           mkdir release
-          cp dist/main release/
+          cp dist/rclone_GUI release/
           cp rclone release/
 
       - name: Zip release
