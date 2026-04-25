@@ -52,6 +52,7 @@ jobs:
 
           cp icon.png AppDir/
           cp icon.ico AppDir/
+          cp rclone_gui.desktop AppDir/
           cp AppRun AppDir/
           chmod +x AppDir/AppRun
 
