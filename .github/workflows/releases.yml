@@ -66,61 +66,6 @@ jobs:
         with:
           files: rclone_GUI-windows-${{ github.ref_name }}.zip
 
-
-# =========================================================
-# LINUX (x64)
-# =========================================================
-  build-linux:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y python3-pyqt6 unzip
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.14.4"
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
-
-      # Download latest rclone
-      - name: Download rclone (Linux)
-        run: |
-          curl -LO https://downloads.rclone.org/rclone-current-linux-amd64.zip
-          unzip rclone-current-linux-amd64.zip
-          cp rclone-*/rclone ./rclone
-          chmod +x rclone
-
-      - name: Build binary
-        run: |
-          pyinstaller --noconfirm --windowed --onefile \
-            --add-data "icon.png:." \
-            rclone_GUI.py
-
-      - name: Prepare release folder
-        run: |
-          mkdir release
-          cp dist/rclone_GUI release/
-          cp rclone release/
-          cp icon.png release/
-
-      - name: Zip release
-        run: zip -r rclone_GUI-linux-${{ github.ref_name }}.zip release
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: rclone_GUI-linux-${{ github.ref_name }}.zip
-
-
 # =========================================================
 # MACOS (Intel x64)
 # =========================================================
