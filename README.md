@@ -62,4 +62,4 @@ Once `PyQt6` is installed, you can run `rclone_GUI.pyw` without triggering any e
 
 By design, it will auto-populate all rclone remotes detected on your system into a dropdown list. I only have one Rclone remote, so it's the only one that will show up in the dropdown menu.
 
-<img width="1205" height="735" alt="cyberdunk_clone_blur" src="https://github.com/user-attachments/assets/5f84f707-f373-4690-920c-69eff1405b1b" />
+<img width="1203" height="732" alt="rclone_gui" src="https://github.com/user-attachments/assets/c4ee6616-14bf-4f8d-b87b-5633683b6314" />
