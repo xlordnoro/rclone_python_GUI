@@ -10,9 +10,11 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton,
     QTextEdit, QLabel, QHBoxLayout, QComboBox,
     QTreeWidget, QTreeWidgetItem, QProgressBar,
-    QLineEdit, QMenu, QMessageBox, QInputDialog
+    QLineEdit, QMenu, QMessageBox, QInputDialog,
+    QHeaderView, QDialog, QListWidget, QPushButton,
+    QHBoxLayout
 )
-from PyQt6.QtCore import QThread, pyqtSignal, QSettings, Qt, QUrl, QMimeData
+from PyQt6.QtCore import QThread, pyqtSignal, QSettings, Qt, QUrl, QMimeData, pyqtSignal
 from PyQt6.QtGui import QDrag, QIcon
 from PyQt6 import QtGui
 
@@ -187,7 +189,8 @@ class RcloneRenameWorker(QThread):
 class LocalTree(QTreeWidget):
     def __init__(self):
         super().__init__()
-        self.setHeaderLabel("Local")
+        self.setColumnCount(2)
+        self.setHeaderLabels(["Name", "Size"])
         self.setDragEnabled(True)
         self.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
 
@@ -246,7 +249,8 @@ class RemoteTree(QTreeWidget):
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
-        self.setHeaderLabel("Remote")
+        self.setColumnCount(2)
+        self.setHeaderLabels(["Name", "Size"])
         self.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
 
         self._highlight = None
@@ -375,6 +379,78 @@ class RcloneDeleteWorker(QThread):
             except:
                 pass
 
+class QueueWindow(QDialog):
+    remove_requested = pyqtSignal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Upload Queue")
+        self.setMinimumSize(500, 400)
+
+        self.list = QListWidget()
+        self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+
+        self.close_btn = QPushButton("Close")
+        self.clear_btn = QPushButton("Clear Finished")
+        self.remove_btn = QPushButton("Remove Selected")
+
+        btns = QHBoxLayout()
+        btns.addWidget(self.remove_btn)
+        btns.addWidget(self.clear_btn)
+        btns.addStretch()
+        btns.addWidget(self.close_btn)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.list)
+        layout.addLayout(btns)
+
+        self.setLayout(layout)
+
+        # connections
+        self.close_btn.clicked.connect(self.close)
+        self.clear_btn.clicked.connect(self.clear_finished)
+        self.remove_btn.clicked.connect(self.remove_selected)
+
+        self.finished_items = []
+
+    def remove_selected(self):
+        items = self.list.selectedItems()
+
+        if not items:
+            return
+
+        to_remove = []
+
+        for item in items:
+            text = item.text().replace("⏳ ", "").replace("🔄 CURRENT: ", "").strip()
+
+            if "→" in text:
+                src, dst = [x.strip() for x in text.split("→", 1)]
+                to_remove.append((src, dst))
+
+        if to_remove:
+            self.remove_requested.emit(to_remove)
+
+    def set_queue(self, queue, active=None):
+        """
+        queue: pending uploads
+        active: current upload (optional tuple)
+        """
+        self.list.clear()
+
+        if active:
+            self.list.addItem(f"🔄 CURRENT: {active[0]} → {active[1]}")
+
+        for src, dst in queue:
+            self.list.addItem(f"⏳ {src} → {dst}")
+
+    def add_finished(self, src, dst):
+        self.finished_items.append((src, dst))
+
+    def clear_finished(self):
+        self.finished_items.clear()
+
 # ---------------------------
 # MAIN APP
 # ---------------------------
@@ -400,6 +476,11 @@ class RcloneGUI(QWidget):
         self.dark_mode_btn = QPushButton("Dark Mode")
         self.dark_mode_btn.setCheckable(True)
         self.dark_mode_btn.clicked.connect(self.toggle_dark_mode)
+
+        self.queue_window = QueueWindow(self)
+        self.queue_btn = QPushButton("Queue")
+        self.queue_btn.clicked.connect(self.open_queue)
+        self.queue_window.remove_requested.connect(self.remove_from_queue)
 
         # CACHE
         self.remote_cache = {}
@@ -444,6 +525,17 @@ class RcloneGUI(QWidget):
         pane.addWidget(self.local_tree)
         pane.addWidget(self.remote_tree)
 
+        # Allow user resizing
+        self.local_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.remote_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+
+        # Set sensible default widths
+        self.local_tree.setColumnWidth(0, 500)  # Name (wide)
+        self.local_tree.setColumnWidth(1, 100)  # Size (small)
+
+        self.remote_tree.setColumnWidth(0, 500)
+        self.remote_tree.setColumnWidth(1, 100)
+
         self.upload_btn = QPushButton("Upload")
         self.cancel_btn = QPushButton("Cancel")
         self.refresh_btn = QPushButton("Refresh")
@@ -475,6 +567,7 @@ class RcloneGUI(QWidget):
         btns.addWidget(self.refresh_btn)
         btns.addWidget(self.mkdir_btn)
         btns.addWidget(self.dark_mode_btn)
+        btns.addWidget(self.queue_btn)
         btns.addWidget(QLabel("Transfers:"))
         btns.addWidget(self.transfers_dropdown)
 
@@ -781,6 +874,33 @@ class RcloneGUI(QWidget):
             self.log.append(f"[exception] {e}")
             return False
 
+    # Queue
+    def open_queue(self):
+        active = None
+
+        if self.upload_running and hasattr(self, "current_upload"):
+            active = self.current_upload
+
+        self.queue_window.set_queue(self.upload_queue, active)
+        self.queue_window.show()
+
+    def remove_from_queue(self, items):
+        if not items:
+            return
+
+        # Remove matching entries from queue
+        self.upload_queue = [
+            q for q in self.upload_queue
+            if q not in items
+        ]
+
+        # Refresh queue window UI
+        active = None
+        if self.upload_running and hasattr(self, "current_upload"):
+            active = self.current_upload
+
+        self.queue_window.set_queue(self.upload_queue, active)
+
     # ---------------------------
     # CACHE
     # ---------------------------
@@ -864,7 +984,13 @@ class RcloneGUI(QWidget):
             for name in os.listdir(path):
                 full = os.path.join(path, name)
 
-                child = QTreeWidgetItem(parent, [name])
+                size_str = ""
+
+                if os.path.isfile(full):
+                    size = os.path.getsize(full)
+                    size_str = self.format_size(size)
+
+                child = QTreeWidgetItem(parent, [name, size_str])
                 child.setData(0, Qt.ItemDataRole.UserRole, full)
 
                 if os.path.isdir(full):
@@ -1005,7 +1131,13 @@ class RcloneGUI(QWidget):
 
             child_path = posixpath.join(path, name)
 
-            child = QTreeWidgetItem(parent, [name])
+            size_str = ""
+
+            if not is_dir:
+                size = entry.get("Size", 0)
+                size_str = self.format_size(size)
+
+            child = QTreeWidgetItem(parent, [name, size_str])
 
             child.setData(0, Qt.ItemDataRole.UserRole, child_path)
             child.setData(0, Qt.ItemDataRole.UserRole + 1, is_dir)
@@ -1068,7 +1200,7 @@ class RcloneGUI(QWidget):
             self.upload_running = False
             self.reset_progress()
 
-            print("✅ Upload queue complete.")  # <-- ADD THIS
+            print("Upload queue complete.")  # <-- ADD THIS
             self.log.append("Upload queue complete.")  # optional GUI log
 
             return
@@ -1076,6 +1208,7 @@ class RcloneGUI(QWidget):
         self.upload_running = True
 
         src, dest = self.upload_queue.pop(0)
+        self.current_upload = (src, dest)
 
         worker = RcloneWorker(src, dest, transfers=self.transfers_dropdown.currentText())
         worker.dest = dest
@@ -1145,6 +1278,13 @@ class RcloneGUI(QWidget):
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self.progress.setFormat("0%")
+
+    def format_size(self, size):
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if size < 1024:
+                return f"{size:.1f} {unit}"
+            size /= 1024
+        return f"{size:.1f} PB"
 
     # ---------------------------
     # REFRESH
