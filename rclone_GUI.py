@@ -1225,16 +1225,75 @@ class RcloneGUI(QWidget):
     # ---------------------------
     def handle_drag_upload(self, sources, remote_item):
         base = remote_item.data(0, Qt.ItemDataRole.UserRole)
+        overwrite_all = False
+        skip_all = False
+
         if not base:
             return
 
         for src in sources:
             if os.path.isfile(src):
-                # 🔥 file → copy INTO directory (not as a directory)
                 dest = base
+                target_path = posixpath.join(base, os.path.basename(src))
             else:
-                # folder → keep name
                 dest = posixpath.join(base, os.path.basename(src))
+                target_path = dest
+
+            action = "upload"  # default
+
+            # ---------------------------
+            # EXISTENCE CHECK
+            # ---------------------------
+            if not overwrite_all and not skip_all:
+                if self.remote_path_exists(target_path):
+                    msg = QMessageBox(self)
+                    msg.setWindowTitle("Overwrite?")
+                    msg.setText(f"This already exists:\n\n{target_path}\n\nWhat do you want to do?")
+
+                    yes_btn = msg.addButton("Yes", QMessageBox.ButtonRole.YesRole)
+                    no_btn = msg.addButton("No", QMessageBox.ButtonRole.NoRole)
+                    yes_all_btn = msg.addButton("Yes to All", QMessageBox.ButtonRole.YesRole)
+                    no_all_btn = msg.addButton("No to All", QMessageBox.ButtonRole.NoRole)
+                    cancel_btn = msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+
+                    msg.exec()
+                    clicked = msg.clickedButton()
+
+                    if clicked == cancel_btn:
+                        self.log.append("❌ Upload cancelled by user")
+                        return
+
+                    elif clicked == yes_all_btn:
+                        overwrite_all = True
+                        self.log.append("🔁 Overwriting all files")
+
+                    elif clicked == no_all_btn:
+                        skip_all = True
+                        self.log.append("⏭️ Skipping all files")
+                        self.log.append(f"⏭️ Skipped: {target_path}")
+                        continue
+
+                    elif clicked == no_btn:
+                        self.log.append(f"⏭️ Skipped: {target_path}")
+                        continue
+
+                    elif clicked == yes_btn:
+                        action = "overwrite"
+
+            elif skip_all:
+                self.log.append(f"⏭️ Skipped: {target_path}")
+                continue
+
+            elif overwrite_all:
+                action = "overwrite"
+
+            # ---------------------------
+            # LOG ACTION
+            # ---------------------------
+            if action == "overwrite":
+                self.log.append(f"🔁 Overwriting: {target_path}")
+            else:
+                self.log.append(f"⬆ Uploading: {target_path}")
 
             self.upload_queue.append((src, dest))
 
@@ -1553,6 +1612,30 @@ class RcloneGUI(QWidget):
 
         self.workers.add(worker)
         worker.start()
+
+    # Overwrite check
+    def remote_path_exists(self, path):
+        parent = posixpath.dirname(path)
+        name = posixpath.basename(path)
+
+        if not parent:
+            return False
+
+        r = subprocess.run(
+            [RCLONE_PATH, "lsf", parent],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+
+        if r.returncode != 0:
+            return False
+
+        entries = r.stdout.splitlines()
+
+        # rclone folders end with /
+        return name in [e.rstrip("/") for e in entries]
 
     # ---------------------------
     # DELETE (SINGLE + MULTI)
