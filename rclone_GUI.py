@@ -386,7 +386,7 @@ class QueueWindow(QDialog):
         super().__init__(parent)
 
         self.setWindowTitle("Upload Queue")
-        self.setMinimumSize(500, 400)
+        self.setMinimumSize(700, 400)
 
         self.list = QListWidget()
         self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
@@ -836,6 +836,60 @@ class RcloneGUI(QWidget):
             QMenu::item:selected {
                 background-color: #2b6cb0;
                 color: black;
+            }
+
+            QScrollBar:vertical {
+                background-color: #f0f0f0;
+                width: 12px;
+                margin: 0px;
+            }
+
+            QScrollBar::handle:vertical {
+                background-color: #c1c1c1;
+                min-height: 20px;
+                border-radius: 5px;
+            }
+
+            QScrollBar::handle:vertical:hover {
+                background-color: #a8a8a8;
+            }
+
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {
+                background: none;
+                height: 0px;
+            }
+
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {
+                background: none;
+            }
+
+            QScrollBar:horizontal {
+                background-color: #f0f0f0;
+                height: 12px;
+                margin: 0px;
+            }
+
+            QScrollBar::handle:horizontal {
+                background-color: #c1c1c1;
+                min-width: 20px;
+                border-radius: 5px;
+            }
+
+            QScrollBar::handle:horizontal:hover {
+                background-color: #a8a8a8;
+            }
+
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal {
+                background: none;
+                width: 0px;
+            }
+
+            QScrollBar::add-page:horizontal,
+            QScrollBar::sub-page:horizontal {
+                background: none;
             }
         """)
 
