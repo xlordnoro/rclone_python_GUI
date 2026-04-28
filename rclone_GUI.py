@@ -276,26 +276,30 @@ class RemoteTree(QTreeWidget):
 
         menu = QMenu(self)
 
+        download_action = menu.addAction("Download")
         new_folder_action = menu.addAction("New Folder")
         delete_action = menu.addAction("Delete")
         rename_action = menu.addAction("Rename")
 
         action = menu.exec(event.globalPos())
 
-        if action == rename_action:
+        if action == download_action:
+            items = self.selectedItems()
+            if item not in items:
+                items.append(item)
+            self.parent().download_remote_items(items)
+
+        elif action == rename_action:
             self.parent().rename_remote_item(item)
 
         elif action == new_folder_action:
-            # Ensure the clicked item is selected so folder goes there
             self.setCurrentItem(item)
             self.parent().create_remote_folder()
 
         elif action == delete_action:
             items = self.selectedItems()
-
             if item not in items:
                 items.append(item)
-
             self.parent().delete_remote_items(items)
 
     def highlight(self, item):
@@ -954,6 +958,41 @@ class RcloneGUI(QWidget):
             active = self.current_upload
 
         self.queue_window.set_queue(self.upload_queue, active)
+
+    def download_remote_items(self, items):
+        if not items:
+            return
+
+        local_base = self.local_path_bar.text().strip()
+        if not local_base:
+            QMessageBox.warning(self, "No local path", "Select a local destination first.")
+            return
+
+        for item in items:
+            remote_path = item.data(0, Qt.ItemDataRole.UserRole)
+            name = os.path.basename(remote_path)
+
+            local_dest = os.path.join(local_base, name)
+
+            self.log.append(f"⬇ Downloading: {remote_path} → {local_dest}")
+
+            worker = RcloneWorker(
+                remote_path,
+                local_dest,
+                transfers=self.transfers_dropdown.currentText()
+            )
+
+            worker.output_signal.connect(self.log.append)
+            worker.progress_signal.connect(self.update_progress)
+
+            def on_done(w, dest=local_base):
+                self.log.append("Download complete")
+                self.refresh_local()
+
+            worker.finished_signal.connect(on_done)
+
+            self.workers.add(worker)
+            worker.start()
 
     # ---------------------------
     # CACHE
