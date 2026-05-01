@@ -38,17 +38,15 @@ def get_app_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 def get_writable_dir():
-    """
-    Where we should store cache/config files.
-    Always writable.
-    """
+    # Windows + macOS + Linux system installs → use XDG (or OS equivalent)
+    base = os.environ.get(
+        "XDG_DATA_HOME",
+        os.path.expanduser("~/.local/share")
+    )
 
-    # AppImage → use where the AppImage is located
-    if "APPIMAGE" in os.environ:
-        return os.path.dirname(os.environ["APPIMAGE"])
-
-    # Otherwise → same as app dir
-    return get_app_dir()
+    path = os.path.join(base, "rclone_gui")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 APP_DIR = get_app_dir()
 DATA_DIR = get_writable_dir()
@@ -488,6 +486,7 @@ class RcloneGUI(QWidget):
 
         # CACHE
         self.remote_cache = {}
+
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         self.cache_file = os.path.join(DATA_DIR, "rclone_gui_cache.json")
 
