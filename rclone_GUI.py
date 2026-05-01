@@ -488,25 +488,8 @@ class RcloneGUI(QWidget):
 
         # CACHE
         self.remote_cache = {}
-
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-        def is_system_install(path):
-            return path.startswith("/usr") or path.startswith("/opt")
-
-        if is_system_install(BASE_DIR):
-            # AUR / system install → writable location
-            data_dir = os.path.join(
-                os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
-                "rclone-python-gui"
-            )
-        else:
-            # dev mode → keep everything next to script
-            data_dir = BASE_DIR
-
-        os.makedirs(data_dir, exist_ok=True)
-
-        self.cache_file = os.path.join(data_dir, "rclone_gui_cache.json")
+        self.cache_file = os.path.join(DATA_DIR, "rclone_gui_cache.json")
 
         self.remote_cache = {}
         self._load_cache_from_disk()
