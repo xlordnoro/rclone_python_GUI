@@ -103,16 +103,23 @@ class RcloneWorker(QThread):
         self.process = None
 
     def run(self):
+        mode = getattr(self, "mode", "copy")
+
         cmd = [
-            RCLONE_PATH, "copy",
+            RCLONE_PATH, mode,
             self.source,
             self.destination,
             "--progress",
             "--stats=1s",
-            "--transfers", str(self.transfers)
         ]
 
-        # 🔥 DEBUG: show exact command
+        # ONLY apply filter for directory-based operations
+        if mode in ("copy", "sync"):
+            cmd += ["--filter", "- .bzEmpty"]
+
+        self.output_signal.emit(f"[DEBUG] {' '.join(cmd)}")
+
+        # DEBUG: show exact command
         pretty_cmd = " ".join(f'"{c}"' if " " in c else c for c in cmd)
         self.output_signal.emit(f"[DEBUG] {pretty_cmd}")
 
@@ -190,7 +197,11 @@ class LocalTree(QTreeWidget):
         self.setColumnCount(2)
         self.setHeaderLabels(["Name", "Size"])
         self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
         self.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+
+        self._highlight = None
 
     def contextMenuEvent(self, event):
         item = self.itemAt(event.pos())
@@ -239,6 +250,73 @@ class LocalTree(QTreeWidget):
         drag.setMimeData(mime)
         drag.exec(supportedActions)
 
+    def dragEnterEvent(self, event):
+        if (
+            event.mimeData().hasUrls()
+            or event.mimeData().hasFormat("application/x-rclone-remote")
+        ):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        item = self.itemAt(event.position().toPoint())
+
+        if item:
+            self.highlight(item)
+        else:
+            self.highlight(None)
+
+        event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        parent = self.itemAt(event.position().toPoint())
+
+        if not parent:
+            return
+
+        base = parent.data(0, Qt.ItemDataRole.UserRole)
+        if not base:
+            base = self.parent().local_path_bar.text().strip()
+
+        # CASE 1: local files (existing behavior)
+        if event.mimeData().hasUrls():
+            sources = [
+                u.toLocalFile()
+                for u in event.mimeData().urls()
+            ]
+            self.parent().handle_drag_upload(sources, parent)
+            event.acceptProposedAction()
+            return
+
+        # CASE 2: remote → local download
+        if event.mimeData().hasFormat("application/x-rclone-remote"):
+            data = json.loads(
+                bytes(event.mimeData().data("application/x-rclone-remote")).decode("utf-8")
+            )
+
+            for entry in data:
+                remote_path = entry["path"]
+                is_dir = entry["is_dir"]
+
+                self.parent().download_remote_items_from_drop(
+                    remote_path,
+                    base,
+                    is_dir
+                )
+
+            event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event):
+        self.highlight(None)
+        event.accept()
+
+    def highlight(self, item):
+        if self._highlight and self._highlight != item:
+            self._highlight.setBackground(0, QtGui.QColor(0, 0, 0, 0))
+
+        self._highlight = item
+
+        if item:
+            item.setBackground(0, QtGui.QColor("#2b6cb0"))
 
 # ---------------------------
 # REMOTE TREE
@@ -247,6 +325,7 @@ class RemoteTree(QTreeWidget):
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
+        self.setDragEnabled(True)
         self.setColumnCount(2)
         self.setHeaderLabels(["Name", "Size"])
         self.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
@@ -301,8 +380,9 @@ class RemoteTree(QTreeWidget):
             self.parent().delete_remote_items(items)
 
     def highlight(self, item):
-        if self._highlight:
-            self._highlight.setBackground(0, Qt.GlobalColor.transparent)
+        # clear previous highlight
+        if self._highlight and self._highlight != item:
+            self._highlight.setBackground(0, QtGui.QColor(0, 0, 0, 0))
 
         self._highlight = item
 
@@ -314,20 +394,60 @@ class RemoteTree(QTreeWidget):
             event.acceptProposedAction()
 
     def dragMoveEvent(self, event):
-        self.highlight(self.itemAt(event.position().toPoint()))
+        item = self.itemAt(event.position().toPoint())
+
+        if item and item.data(0, Qt.ItemDataRole.UserRole + 1) is True:
+            self.highlight(item)
+        else:
+            self.highlight(None)
+
         event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event):
+        self.highlight(None)
+        event.accept()
 
     def dropEvent(self, event):
         item = self.itemAt(event.position().toPoint())
-        if not item:
-            return
 
         self.highlight(None)
+
+        if not item:
+            return
 
         sources = list(set(u.toLocalFile() for u in event.mimeData().urls()))
         self.parent().handle_drag_upload(sources, item)
 
         event.acceptProposedAction()
+
+    def startDrag(self, supportedActions):
+        items = self.selectedItems()
+
+        if not items:
+            return
+
+        mime = QMimeData()
+
+        remote_data = []
+
+        for item in items:
+            path = item.data(0, Qt.ItemDataRole.UserRole)
+            is_dir = item.data(0, Qt.ItemDataRole.UserRole + 1)
+
+            if path:
+                remote_data.append({
+                    "path": path,
+                    "is_dir": is_dir
+                })
+
+        mime.setData(
+            "application/x-rclone-remote",
+            json.dumps(remote_data).encode("utf-8")
+        )
+
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.exec(supportedActions)
 
 class RcloneDeleteWorker(QThread):
     output_signal = pyqtSignal(str)
@@ -914,21 +1034,25 @@ class RcloneGUI(QWidget):
     def _is_valid_remote_path(self, path):
         try:
             r = subprocess.run(
-                [RCLONE_PATH, "lsjson", path],
+                [RCLONE_PATH, "lsf", path],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace"
             )
 
+            # STRICT RULE:
+            # non-zero OR empty output = invalid
             if r.returncode != 0:
-                self.log.append(f"[rclone error] {r.stderr.strip() or r.stdout.strip()}")
+                return False
+
+            if not r.stdout.strip():
                 return False
 
             return True
 
         except Exception as e:
-            self.log.append(f"[exception] {e}")
+            self.log.append(f"[validator error] {e}")
             return False
 
     # Queue
@@ -969,11 +1093,20 @@ class RcloneGUI(QWidget):
 
         for item in items:
             remote_path = item.data(0, Qt.ItemDataRole.UserRole)
-            name = os.path.basename(remote_path)
+            is_dir = item.data(0, Qt.ItemDataRole.UserRole + 1)
 
-            local_dest = os.path.join(local_base, name)
+            name = os.path.basename(remote_path.rstrip("/"))
 
-            self.log.append(f"⬇ Downloading: {remote_path} → {local_dest}")
+            if is_dir:
+                # folder download (safe as-is)
+                local_dest = os.path.join(local_base, name)
+                mode = "copy"
+            else:
+                # file download (IMPORTANT FIX)
+                local_dest = os.path.join(local_base, name)
+                mode = "copyto"
+
+            self.log.append(f"⬇ Downloading ({mode}): {remote_path} → {local_dest}")
 
             worker = RcloneWorker(
                 remote_path,
@@ -981,10 +1114,13 @@ class RcloneGUI(QWidget):
                 transfers=self.transfers_dropdown.currentText()
             )
 
+            # override command behavior dynamically
+            worker.mode = mode
+
             worker.output_signal.connect(self.log.append)
             worker.progress_signal.connect(self.update_progress)
 
-            def on_done(w, dest=local_base):
+            def on_done(w):
                 self.log.append("Download complete")
                 self.refresh_local()
 
@@ -992,6 +1128,34 @@ class RcloneGUI(QWidget):
 
             self.workers.add(worker)
             worker.start()
+
+    def download_remote_items_from_drop(self, remote_path, local_base, is_dir):
+        name = os.path.basename(remote_path.rstrip("/"))
+
+        if is_dir:
+            local_dest = os.path.join(local_base, name)
+            mode = "copy"
+        else:
+            local_dest = os.path.join(local_base, name)
+            mode = "copyto"
+
+        self.log.append(f"⬇ Drop download ({mode}): {remote_path} → {local_dest}")
+
+        worker = RcloneWorker(
+            remote_path,
+            local_dest,
+            transfers=self.transfers_dropdown.currentText()
+        )
+
+        worker.mode = mode
+
+        worker.output_signal.connect(self.log.append)
+        worker.progress_signal.connect(self.update_progress)
+
+        worker.finished_signal.connect(lambda w: self.refresh_local())
+
+        self.workers.add(worker)
+        worker.start()
 
     # ---------------------------
     # CACHE
@@ -1144,16 +1308,39 @@ class RcloneGUI(QWidget):
         if not path:
             return
 
-        # HARD GUARD (fast path)
         is_dir = item.data(0, Qt.ItemDataRole.UserRole + 1)
         if is_dir is not True:
             return
 
-        # Use cache first
+        # --------------------------------------------------
+        # VALIDATION
+        # --------------------------------------------------
+        if not self._is_valid_remote_path(path):
+            self.log.append(f"[blocked] invalid folder: {path}")
+
+            # purge stale cache entry if it exists
+            self.remote_cache.pop(path, None)
+
+            item.takeChildren()
+            item.setData(0, Qt.ItemDataRole.UserRole + 1, False)
+            item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator
+            )
+            return
+
+        # already expanded → do nothing
+        if item.childCount() != 1:
+            return
+
+        # remove placeholder
+        item.takeChildren()
+
+        # --------------------------------------------------
+        # CACHE (ONLY AFTER VALIDATION)
+        # --------------------------------------------------
         cached = self.remote_cache.get(path)
 
         if cached is None:
-            # Only verify with rclone if NOT cached
             test = subprocess.run(
                 [RCLONE_PATH, "lsjson", path],
                 capture_output=True,
@@ -1163,41 +1350,33 @@ class RcloneGUI(QWidget):
             )
 
             if test.returncode != 0:
-                # Not actually a directory → fix UI state
-                self.log.append(f"[fix] not a directory: {path}")
+                self.log.append(f"[fix] not a directory (or inaccessible): {path}")
+
+                # ensure cache doesn't keep bad state
+                self.remote_cache.pop(path, None)
 
                 item.setData(0, Qt.ItemDataRole.UserRole + 1, False)
                 item.setChildIndicatorPolicy(
                     QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator
                 )
-                item.takeChildren()
                 return
 
-            # Cache the successful result
             try:
                 cached = json.loads(test.stdout or "[]")
-                self.remote_cache[path] = cached
-                self._save_cache_to_disk()
-            except:
+            except Exception:
                 cached = []
 
-        # already expanded → do nothing
-        if item.childCount() != 1:
-            return
+            self.remote_cache[path] = cached
+            self._save_cache_to_disk()
 
-        # remove placeholder
-        item.takeChildren()
-
-        # Only validate if we don't find the files/folders in the cache
-        # (you can remove this entirely if confident in lsjson)
-        if path not in self.remote_cache:
-            if not self._is_valid_remote_path(path):
-                self.log.append(f"[blocked] invalid folder: {path}")
-                return
-
+        # --------------------------------------------------
+        # UPDATE UI STATE
+        # --------------------------------------------------
         self.remote_path_bar.setText(path)
 
-        # Pass cached data directly to avoid another lookup
+        # --------------------------------------------------
+        # LOAD CHILDREN
+        # --------------------------------------------------
         self._load_remote_children(item, path)
 
     def _load_remote_children(self, parent, path):
