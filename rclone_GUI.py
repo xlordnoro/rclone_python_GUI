@@ -5,6 +5,7 @@ import posixpath
 import os
 import platform
 import shutil
+import re
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QPushButton,
@@ -187,6 +188,78 @@ class RcloneRenameWorker(QThread):
         if self.process:
             self.process.terminate()
 
+class SortableTreeItem(QTreeWidgetItem):
+    """
+    QTreeWidgetItem with:
+      - folders before files
+      - natural/case-insensitive name sorting
+      - numeric size sorting
+    """
+
+    def __lt__(self, other):
+        tree = self.treeWidget()
+
+        if tree is None:
+            return super().__lt__(other)
+
+        column = tree.sortColumn()
+
+        # --------------------------------------------------
+        # Determine whether each item is a directory
+        # --------------------------------------------------
+        self_is_dir = self.data(
+            0, Qt.ItemDataRole.UserRole + 1
+        ) in (True, "directory")
+
+        other_is_dir = other.data(
+            0, Qt.ItemDataRole.UserRole + 1
+        ) in (True, "directory")
+
+        # Folders always come before files.
+        if self_is_dir != other_is_dir:
+            return self_is_dir
+
+        # --------------------------------------------------
+        # NAME COLUMN
+        # --------------------------------------------------
+        if column == 0:
+            a = self.text(0)
+            b = other.text(0)
+
+            def natural_key(value):
+                parts = re.split(r"(\d+)", value.casefold())
+
+                return [
+                    int(part) if part.isdigit() else part
+                    for part in parts
+                ]
+
+            return natural_key(a) < natural_key(b)
+
+        # --------------------------------------------------
+        # SIZE COLUMN
+        # --------------------------------------------------
+        if column == 1:
+            a = self.data(
+                1, Qt.ItemDataRole.UserRole
+            )
+            b = other.data(
+                1, Qt.ItemDataRole.UserRole
+            )
+
+            # Directories have no size.
+            if a is None:
+                a = -1
+
+            if b is None:
+                b = -1
+
+            try:
+                return int(a) < int(b)
+            except (TypeError, ValueError):
+                return self.text(1).casefold() < other.text(1).casefold()
+
+        return super().__lt__(other)
 
 # ---------------------------
 # LOCAL TREE
@@ -196,6 +269,8 @@ class LocalTree(QTreeWidget):
         super().__init__()
         self.setColumnCount(2)
         self.setHeaderLabels(["Name", "Size"])
+        self.setSortingEnabled(True)
+        self.sortItems(0, Qt.SortOrder.AscendingOrder)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
@@ -328,6 +403,8 @@ class RemoteTree(QTreeWidget):
         self.setDragEnabled(True)
         self.setColumnCount(2)
         self.setHeaderLabels(["Name", "Size"])
+        self.setSortingEnabled(True)
+        self.sortItems(0, Qt.SortOrder.AscendingOrder)
         self.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
 
         self._highlight = None
@@ -634,6 +711,15 @@ class RcloneGUI(QWidget):
         path_layout.addWidget(self.remote_up_btn)
         path_layout.addWidget(self.remote_path_bar)
 
+        # Search bars
+        self.local_search = QLineEdit()
+        self.local_search.setPlaceholderText("Search local files...")
+        self.local_search.textChanged.connect(self.filter_local_tree)
+
+        self.remote_search = QLineEdit()
+        self.remote_search.setPlaceholderText("Search remote files...")
+        self.remote_search.textChanged.connect(self.filter_remote_tree)
+
         self.remote_dropdown = QComboBox()
         self.remote_dropdown.currentIndexChanged.connect(self.load_remote_root)
 
@@ -682,6 +768,12 @@ class RcloneGUI(QWidget):
         layout.addWidget(QLabel("Remote"))
         layout.addWidget(self.remote_dropdown)
         layout.addLayout(path_layout)
+
+        # Search bars
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(self.local_search)
+        search_layout.addWidget(self.remote_search)
+        layout.addLayout(search_layout)
         layout.addLayout(pane)
 
         btns = QHBoxLayout()
@@ -1217,42 +1309,92 @@ class RcloneGUI(QWidget):
 
         item = QTreeWidgetItem(self.local_tree, [root])
         item.setData(0, Qt.ItemDataRole.UserRole, root)
-        item.addChild(QTreeWidgetItem(["..."]))
+
+        # Load the directory immediately instead of using only
+        # a placeholder. This means Refresh always shows
+        # newly-created files/folders.
+        self._load_local_children(item, root)
+
+        item.setExpanded(True)
 
     def reload_local_root(self):
         self.load_local_files(self.local_path_bar.text())
 
     def expand_local(self, item):
-        if item.childCount() != 1:
+        path = item.data(0, Qt.ItemDataRole.UserRole)
+
+        if not path:
+            return
+
+        self.local_path_bar.setText(path)
+        self.settings.setValue("last_local", path)
+
+        # If this directory has already been loaded, don't reload it
+        # just because Qt emitted itemExpanded.
+        if item.data(0, Qt.ItemDataRole.UserRole + 1) == "loaded":
             return
 
         item.takeChildren()
-
-        path = item.data(0, Qt.ItemDataRole.UserRole)
-        self.local_path_bar.setText(path)
-
-        self.settings.setValue("last_local", path)
-
         self._load_local_children(item, path)
+
+        item.setData(0, Qt.ItemDataRole.UserRole + 1, "loaded")
+
+    def _sort_tree(self, tree):
+        column = tree.header().sortIndicatorSection()
+        order = tree.header().sortIndicatorOrder()
+
+        tree.sortItems(column, order)
 
     def _load_local_children(self, parent, path):
         try:
             for name in os.listdir(path):
                 full = os.path.join(path, name)
 
+                size = None
                 size_str = ""
 
                 if os.path.isfile(full):
                     size = os.path.getsize(full)
                     size_str = self.format_size(size)
 
-                child = QTreeWidgetItem(parent, [name, size_str])
-                child.setData(0, Qt.ItemDataRole.UserRole, full)
+                child = SortableTreeItem(
+                    parent,
+                    [name, size_str]
+                )
+
+                child.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    full
+                )
+
+                child.setData(
+                    1,
+                    Qt.ItemDataRole.UserRole,
+                    size
+                )
 
                 if os.path.isdir(full):
-                    child.addChild(QTreeWidgetItem(["..."]))
+                    child.setData(
+                        0,
+                        Qt.ItemDataRole.UserRole + 1,
+                        "directory"
+                    )
+
+                    child.addChild(
+                        QTreeWidgetItem(["..."])
+                    )
+
         except Exception as e:
             self.log.append(f"[local error] {e}")
+
+        parent.setData(
+            0,
+            Qt.ItemDataRole.UserRole + 1,
+            "loaded"
+        )
+
+        self._sort_tree(self.local_tree)
 
     # ---------------------------
     # REMOTE
@@ -1285,7 +1427,14 @@ class RcloneGUI(QWidget):
 
     def _get_remote_listing(self, path):
         if path in self.remote_cache:
+            self.log.append(
+                f"[cache] Using cached listing: {path}"
+            )
             return self.remote_cache[path]
+
+        self.log.append(
+            f"[cache] Fetching fresh listing from rclone: {path}"
+        )
 
         r = subprocess.run(
             [RCLONE_PATH, "lsjson", path],
@@ -1296,11 +1445,26 @@ class RcloneGUI(QWidget):
         )
 
         if r.returncode != 0:
+            self.log.append(
+                f"[cache] lsjson failed for {path}: {r.stderr.strip()}"
+            )
             return None
 
-        data = json.loads(r.stdout or "[]")
+        try:
+            data = json.loads(r.stdout or "[]")
+        except Exception as e:
+            self.log.append(
+                f"[cache] JSON parse failed for {path}: {e}"
+            )
+            return None
+
         self.remote_cache[path] = data
         self._save_cache_to_disk()
+
+        self.log.append(
+            f"[cache] Fresh listing contains {len(data)} entries: {path}"
+        )
+
         return data
 
     def load_remote_folder(self, item):
@@ -1408,10 +1572,28 @@ class RcloneGUI(QWidget):
                 size = entry.get("Size", 0)
                 size_str = self.format_size(size)
 
-            child = QTreeWidgetItem(parent, [name, size_str])
+            child = SortableTreeItem(
+                parent,
+                [name, size_str]
+            )
 
-            child.setData(0, Qt.ItemDataRole.UserRole, child_path)
-            child.setData(0, Qt.ItemDataRole.UserRole + 1, is_dir)
+            child.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                child_path
+            )
+
+            child.setData(
+                0,
+                Qt.ItemDataRole.UserRole + 1,
+                is_dir
+            )
+
+            child.setData(
+                1,
+                Qt.ItemDataRole.UserRole,
+                entry.get("Size") if not is_dir else None
+            )
 
             if is_dir:
                 # ONLY directories get lazy-loading placeholder
@@ -1621,31 +1803,80 @@ class RcloneGUI(QWidget):
     # ---------------------------
     def refresh_remote(self):
         path = self.remote_path_bar.text().strip()
-        item = self._find_item(self.remote_tree.invisibleRootItem(), path)
+
+        if not path:
+            return
+
+        self.log.append(f"[refresh] Forcing fresh listing: {path}")
+
+        # Remove this directory from the in-memory cache.
+        self.remote_cache.pop(path, None)
+
+        # Find the directory currently displayed in the tree.
+        item = self._find_item(
+            self.remote_tree.invisibleRootItem(),
+            path
+        )
 
         if item:
             expanded = item.isExpanded()
 
+            # Completely rebuild this directory.
             item.takeChildren()
+
+            # IMPORTANT:
+            # _load_remote_children() will now call rclone lsjson
+            # because we removed this path from remote_cache.
             self._load_remote_children(item, path)
 
             item.setExpanded(expanded)
+
         else:
-            self.load_remote_root()
+            # Root/current path isn't represented by a tree item.
+            self.remote_tree.clear()
+            self._load_remote_children(
+                self.remote_tree.invisibleRootItem(),
+                path
+            )
+
+        self._save_cache_to_disk()
 
     def refresh_local(self):
         path = self.local_path_bar.text().strip()
+
         if not path:
             return
 
-        item = self._find_item(self.local_tree.invisibleRootItem(), path)
+        self.log.append(f"[refresh local] Reloading: {path}")
+
+        item = self._find_item(
+            self.local_tree.invisibleRootItem(),
+            path
+        )
 
         if item:
+            expanded = item.isExpanded()
+
+            # Remove stale children
             item.takeChildren()
+
+            # Read the directory from disk again
             self._load_local_children(item, path)
+
+            item.setExpanded(expanded)
+
         else:
+            # The displayed path isn't represented by an existing tree item.
             self.local_tree.clear()
             self.load_local_files(path)
+
+            # Immediately populate the root/current directory.
+            root_item = self.local_tree.topLevelItem(0)
+
+            if root_item:
+                root_item.takeChildren()
+                self._load_local_children(root_item, path)
+                root_item.setExpanded(True)
 
     def _find_item(self, parent, path):
         for i in range(parent.childCount()):
@@ -1970,6 +2201,47 @@ class RcloneGUI(QWidget):
         self._save_cache_to_disk()
         self.refresh_remote()
 
+    def filter_local_tree(self, text):
+        self._filter_tree(self.local_tree, text)
+
+
+    def filter_remote_tree(self, text):
+        self._filter_tree(self.remote_tree, text)
+
+
+    def _filter_tree(self, tree, text):
+        text = text.strip().lower()
+
+        def filter_item(item):
+            name = item.text(0).lower()
+            matches = not text or text in name
+
+            # Keep children visible if one of them matches.
+            child_matches = False
+
+            for i in range(item.childCount()):
+                child = item.child(i)
+
+                # Don't let the lazy-loading "..." placeholder affect filtering.
+                if child.text(0) == "...":
+                    continue
+
+                if filter_item(child):
+                    child_matches = True
+
+            visible = matches or child_matches
+            item.setHidden(not visible)
+
+            # Automatically open matching parent folders.
+            if child_matches and text:
+                item.setExpanded(True)
+
+            return visible
+
+        root = tree.invisibleRootItem()
+
+        for i in range(root.childCount()):
+            filter_item(root.child(i))
 
 # ---------------------------
 # RUN

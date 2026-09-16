@@ -22,7 +22,7 @@ Arch Linux uses an externally managed installation, so I have to use the virtual
 - Run `python -m venv myenv` to create the virtual environment in the current working directory. You can change the myenv to anything you want, but this will work for testing or if you don't care about the name.
 - Next, run `source myenv/bin/activate` to enter the virtual environment. If you changed the name in the previous command, swap myenv for the name you provided, or it will not work!
 - Run `pip install PyQt6` to download the GUI library needed to run the script, or you'll get import errors when attempting to run the Python script.
-With `PyQt6` installed now, you can run `python3 rclone_GUI.pyw`. You need to run the script in the virtual environment since `PyQt6` is only available in the environment and trying to run it outside will result in an import error.
+With `PyQt6` installed now, you can run `python3 rclone_GUI.py`. You need to run the script in the virtual environment since `PyQt6` is only available in the environment and trying to run it outside will result in an import error.
 - Run `deactivate` to exit the virtual environment.
 
 # Windows Installation
@@ -58,7 +58,7 @@ It will take a bit to install since it needs to download a bunch of libraries to
 
 Run `pip install PyQt6`, and it will immediately start downloading the library to your system. It's a few hundred mb so if your internet is slow, just be patient and let it do its thing.
 
-Once `PyQt6` is installed, you can run `rclone_GUI.pyw` without triggering any errors. You can either double-click it in file explorer or run it as a command `python rclone_GUI.pyw` in the terminal, and you should see a terminal window pop up with rclone. Close the rclone window. I'm not 100% sure why it only happens in Windows since Linux doesn't do that (might be a subprocess difference between the OS's), and you should see the GUI like this.
+Once `PyQt6` is installed, you can run `rclone_GUI.py` without triggering any errors. You can either double-click it in file explorer or run it as a command `python rclone_GUI.py` in the terminal, and you should see a terminal window pop up with rclone. Close the rclone window. I'm not 100% sure why it only happens in Windows since Linux doesn't do that (might be a subprocess difference between the OS's), and you should see the GUI like this.
 
 By design, it will auto-populate all rclone remotes detected on your system into a dropdown list. I only have one Rclone remote, so it's the only one that will show up in the dropdown menu.
 
