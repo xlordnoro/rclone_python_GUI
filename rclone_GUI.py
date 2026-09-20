@@ -199,23 +199,25 @@ class SortableTreeItem(QTreeWidgetItem):
     def __lt__(self, other):
         tree = self.treeWidget()
 
-        if tree is None:
+        if tree is None or not isinstance(other, QTreeWidgetItem):
             return super().__lt__(other)
 
         column = tree.sortColumn()
 
         # --------------------------------------------------
-        # Determine whether each item is a directory
+        # DETERMINE WHETHER ITEMS ARE DIRECTORIES
         # --------------------------------------------------
         self_is_dir = self.data(
-            0, Qt.ItemDataRole.UserRole + 1
-        ) in (True, "directory")
+            0,
+            Qt.ItemDataRole.UserRole + 1
+        ) == "dir"
 
         other_is_dir = other.data(
-            0, Qt.ItemDataRole.UserRole + 1
-        ) in (True, "directory")
+            0,
+            Qt.ItemDataRole.UserRole + 1
+        ) == "dir"
 
-        # Folders always come before files.
+        # Directories always come before files
         if self_is_dir != other_is_dir:
             return self_is_dir
 
@@ -227,38 +229,62 @@ class SortableTreeItem(QTreeWidgetItem):
             b = other.text(0)
 
             def natural_key(value):
+                """
+                Sort episode-based filenames by their actual episode
+                number.
+                """
+                episode_match = re.search(
+                    r"_-_(\d+)(?=_|\.)",
+                    value,
+                    re.IGNORECASE
+                )
+
+                if episode_match:
+                    episode_number = int(episode_match.group(1))
+
+                    return (
+                        0,
+                        episode_number,
+                        value.casefold()
+                    )
+
+                # --------------------------------------------------
+                # FALLBACK NATURAL SORT
+                # --------------------------------------------------
+                # Used for filenames that do not contain the expected
+                # "_-_episode" pattern.
                 parts = re.split(r"(\d+)", value.casefold())
 
-                return [
-                    int(part) if part.isdigit() else part
-                    for part in parts
-                ]
+                return (
+                    1,
+                    tuple(
+                        (1, int(part)) if part.isdigit()
+                        else (0, part)
+                        for part in parts
+                    ),
+                )
 
             return natural_key(a) < natural_key(b)
 
         # --------------------------------------------------
         # SIZE COLUMN
         # --------------------------------------------------
-        if column == 1:
-            a = self.data(
-                1, Qt.ItemDataRole.UserRole
-            )
-            b = other.data(
-                1, Qt.ItemDataRole.UserRole
-            )
-
-            # Directories have no size.
-            if a is None:
-                a = -1
-
-            if b is None:
-                b = -1
+        elif column == 1:
+            try:
+                a = int(self.text(1).replace(",", "").split()[0])
+            except (ValueError, IndexError):
+                a = 0
 
             try:
-                return int(a) < int(b)
-            except (TypeError, ValueError):
-                return self.text(1).casefold() < other.text(1).casefold()
+                b = int(other.text(1).replace(",", "").split()[0])
+            except (ValueError, IndexError):
+                b = 0
 
+            return a < b
+
+        # --------------------------------------------------
+        # FALLBACK
+        # --------------------------------------------------
         return super().__lt__(other)
 
 # ---------------------------
@@ -1476,6 +1502,10 @@ class RcloneGUI(QWidget):
         if is_dir is not True:
             return
 
+        # already expanded → do nothing
+        if item.childCount() != 1:
+            return
+
         # --------------------------------------------------
         # VALIDATION
         # --------------------------------------------------
@@ -1492,15 +1522,11 @@ class RcloneGUI(QWidget):
             )
             return
 
-        # already expanded → do nothing
-        if item.childCount() != 1:
-            return
-
         # remove placeholder
         item.takeChildren()
 
         # --------------------------------------------------
-        # CACHE (ONLY AFTER VALIDATION)
+        # CACHE
         # --------------------------------------------------
         cached = self.remote_cache.get(path)
 
@@ -1514,12 +1540,18 @@ class RcloneGUI(QWidget):
             )
 
             if test.returncode != 0:
-                self.log.append(f"[fix] not a directory (or inaccessible): {path}")
+                self.log.append(
+                    f"[fix] not a directory (or inaccessible): {path}"
+                )
 
                 # ensure cache doesn't keep bad state
                 self.remote_cache.pop(path, None)
 
-                item.setData(0, Qt.ItemDataRole.UserRole + 1, False)
+                item.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole + 1,
+                    False
+                )
                 item.setChildIndicatorPolicy(
                     QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator
                 )
@@ -1527,7 +1559,10 @@ class RcloneGUI(QWidget):
 
             try:
                 cached = json.loads(test.stdout or "[]")
-            except Exception:
+            except Exception as e:
+                self.log.append(
+                    f"[fix] invalid lsjson response for {path}: {e}"
+                )
                 cached = []
 
             self.remote_cache[path] = cached
@@ -1543,12 +1578,14 @@ class RcloneGUI(QWidget):
         # --------------------------------------------------
         self._load_remote_children(item, path)
 
-    def _load_remote_children(self, parent, path):
-        if not self._is_valid_remote_path(path):
-            self.log.append(f"[blocked] invalid path: {path}")
-            return
+    def _load_remote_children(self, parent, path, data=None):
+        if data is None:
+            if not self._is_valid_remote_path(path):
+                self.log.append(f"[blocked] invalid path: {path}")
+                return
 
-        data = self._get_remote_listing(path)
+            data = self._get_remote_listing(path)
+
         if data is None:
             return
 
